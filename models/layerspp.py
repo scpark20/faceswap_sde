@@ -210,7 +210,7 @@ class ResnetBlockDDPMpp(nn.Module):
 
 
 class ResnetBlockBigGANpp(nn.Module):
-  def __init__(self, act, in_ch, out_ch=None, temb_dim=None, up=False, down=False,
+  def __init__(self, act, in_ch, out_ch=None, temb_dim=None, cond_dim=None, up=False, down=False,
                dropout=0.1, fir=False, fir_kernel=(1, 3, 3, 1),
                skip_rescale=True, init_scale=0.):
     super().__init__()
@@ -228,6 +228,11 @@ class ResnetBlockBigGANpp(nn.Module):
       self.Dense_0.weight.data = default_init()(self.Dense_0.weight.shape)
       nn.init.zeros_(self.Dense_0.bias)
 
+    if cond_dim is not None:
+      self.Dense_1 = nn.Linear(cond_dim, out_ch)
+      self.Dense_1.weight.data = default_init()(self.Dense_1.weight.shape)
+      nn.init.zeros_(self.Dense_1.bias)
+
     self.GroupNorm_1 = nn.GroupNorm(num_groups=min(out_ch // 4, 32), num_channels=out_ch, eps=1e-6)
     self.Dropout_0 = nn.Dropout(dropout)
     self.Conv_1 = conv3x3(out_ch, out_ch, init_scale=init_scale)
@@ -239,7 +244,7 @@ class ResnetBlockBigGANpp(nn.Module):
     self.in_ch = in_ch
     self.out_ch = out_ch
 
-  def forward(self, x, temb=None):
+  def forward(self, x, temb=None, c=None):
     h = self.act(self.GroupNorm_0(x))
 
     if self.up:
@@ -261,6 +266,8 @@ class ResnetBlockBigGANpp(nn.Module):
     # Add bias to each feature map conditioned on the time embedding
     if temb is not None:
       h += self.Dense_0(self.act(temb))[:, :, None, None]
+    if c is not None:
+      h += self.Dense_1(c)[:, :, None, None]
     h = self.act(self.GroupNorm_1(h))
     h = self.Dropout_0(h)
     h = self.Conv_1(h)
