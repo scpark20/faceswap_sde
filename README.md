@@ -14,6 +14,10 @@ example
 CUDA_VISIBLE_DEVICES=2,3 python main.py --config configs/faceswap/vgghq_64_ncsnpp_continuous1.py --mode train --workdir vgghq_64_1
 ```
 
+To configure multi-GPU training, Modify the config .py file
+```sh
+config.device_ids = [0, 1]
+```
 
 # Score-Based Generative Modeling through Stochastic Differential Equations
 
