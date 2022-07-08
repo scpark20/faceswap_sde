@@ -1,3 +1,20 @@
+### Training
+
+Set vggface2 image directory in the configs .py file 
+
+```sh
+data.path = '/data/VGG-Face2-HQ'
+```
+
+And run
+```sh
+CUDA_VISIBLE_DEVICES=X python main.py --config config_file.py --mode train --workdir checkpoint_dir
+
+example
+CUDA_VISIBLE_DEVICES=2,3 python main.py --config configs/faceswap/vgghq_64_ncsnpp_continuous1.py --mode train --workdir vgghq_64_1
+```
+
+
 # Score-Based Generative Modeling through Stochastic Differential Equations
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/score-based-generative-modeling-through-1/image-generation-on-cifar-10)](https://paperswithcode.com/sota/image-generation-on-cifar-10?p=score-based-generative-modeling-through-1)
