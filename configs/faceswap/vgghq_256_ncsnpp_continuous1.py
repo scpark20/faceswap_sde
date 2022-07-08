@@ -23,7 +23,7 @@ def get_config():
   # training
   config.training = training = ml_collections.ConfigDict()
   #config.training.batch_size = 512
-  config.training.batch_size = 30
+  config.training.batch_size = 14models
   training.n_iters = 2400001
   training.snapshot_freq = 5000
   training.log_freq = 1
