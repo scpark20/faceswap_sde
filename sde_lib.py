@@ -32,6 +32,10 @@ class SDE(abc.ABC):
     pass
 
   @abc.abstractmethod
+  def predict_unperturbed_data(self, perturbed_data, score, marginal_mean, marginal_std):
+    pass
+
+  @abc.abstractmethod
   def prior_sampling(self, shape):
     """Generate one sample from the prior distribution, $p_T(x)$."""
     pass
@@ -90,19 +94,19 @@ class SDE(abc.ABC):
       def T(self):
         return T
 
-      def sde(self, x, t):
+      def sde(self, x, t, c):
         """Create the drift and diffusion functions for the reverse SDE/ODE."""
         drift, diffusion = sde_fn(x, t)
-        score = score_fn(x, t)
+        score = score_fn(x, t, c)
         drift = drift - diffusion[:, None, None, None] ** 2 * score * (0.5 if self.probability_flow else 1.)
         # Set the diffusion function to zero for ODEs.
         diffusion = 0. if self.probability_flow else diffusion
         return drift, diffusion
 
-      def discretize(self, x, t):
+      def discretize(self, x, t, c):
         """Create discretized iteration rules for the reverse diffusion sampler."""
         f, G = discretize_fn(x, t)
-        rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t) * (0.5 if self.probability_flow else 1.)
+        rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t, c) * (0.5 if self.probability_flow else 1.)
         rev_G = torch.zeros_like(G) if self.probability_flow else G
         return rev_f, rev_G
 
@@ -234,6 +238,13 @@ class VESDE(SDE):
     std = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
     mean = x
     return mean, std
+
+  def predict_unperturbed_data(self, perturbed_data, score, marginal_mean, marginal_std):
+    # x_t = x_0 + std * eps, eps ~ N(0, I)
+    # s(x_t) * std + eps = 0, in loss func
+    # therefore, x_0 = std**2 * s(x_t)
+    unperturbed_data = marginal_std**2 * score + perturbed_data
+    return unperturbed_data
 
   def prior_sampling(self, shape):
     return torch.randn(*shape) * self.sigma_max

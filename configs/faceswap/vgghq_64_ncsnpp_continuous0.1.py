@@ -23,13 +23,13 @@ def get_config():
   # training
   config.training = training = ml_collections.ConfigDict()
   #config.training.batch_size = 512
-  config.training.batch_size = 180
+  config.training.batch_size = 100
   training.n_iters = 2400001
-  training.snapshot_freq = 1000
+  training.snapshot_freq = 5000
   training.log_freq = 1
   training.eval_freq = 100
   ## store additional checkpoints for preemption in cloud computing environments
-  training.snapshot_freq_for_preemption = 1000
+  training.snapshot_freq_for_preemption = 5000
   ## produce samples at each snapshot.
   training.snapshot_sampling = False
   training.likelihood_weighting = False
@@ -37,7 +37,7 @@ def get_config():
   training.reduce_mean = False
   training.sde = 'vesde'
   training.continuous = True
-  training.id_weight = 0.1
+  training.id_weight = 10
 
   # eval
   config.eval = evaluate = ml_collections.ConfigDict()
@@ -113,6 +113,6 @@ def get_config():
 
   config.seed = 42
   config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-  config.device_ids = [0, 1, 2, 3, 4, 5]
+  config.device_ids = [0, 1]
 
   return config

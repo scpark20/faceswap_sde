@@ -21,7 +21,7 @@ import torch.optim as optim
 import numpy as np
 from models import utils as mutils
 from sde_lib import VESDE, VPSDE
-
+from arcface import cosin_metric
 
 def get_optimizer(config, params):
   """Returns a flax optimizer object based on `config`."""
@@ -51,7 +51,6 @@ def optimization_manager(config):
 
   return optimize_fn
 
-
 def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """Create a loss function for training with arbirary SDEs.
 
@@ -70,7 +69,7 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
   """
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(model, batch):
+  def loss_fn(model, batch, get_id):
     """Compute the loss function.
 
     Args:
@@ -85,18 +84,25 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     z = torch.randn_like(batch)
     mean, std = sde.marginal_prob(batch, t)
     perturbed_data = mean + std[:, None, None, None] * z
-    score = score_fn(perturbed_data, t)
+    img_id = get_id(img=batch)
+    score = score_fn(perturbed_data, t, img_id)
+    unperturbed_data = sde.predict_unperturbed_data(perturbed_data, score, mean, std[:, None, None, None])
+    prd_id = get_id(img=unperturbed_data)
 
+    loss_dict = {}
     if not likelihood_weighting:
-      losses = torch.square(score * std[:, None, None, None] + z)
-      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
+      recon_losses = torch.square(score * std[:, None, None, None] + z)
+      recon_losses = reduce_op(recon_losses.reshape(recon_losses.shape[0], -1), dim=-1)
+      id_losses = 1 - cosin_metric(img_id, prd_id)
+      id_losses = reduce_op(id_losses, dim=-1)
     else:
       g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
       losses = torch.square(score + z / std[:, None, None, None])
       losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
 
-    loss = torch.mean(losses)
-    return loss
+    loss_dict['recon_loss'] = torch.mean(recon_losses)
+    loss_dict['id_loss'] = torch.mean(id_losses)
+    return loss_dict
 
   return loss_fn
 
@@ -174,7 +180,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
-  def step_fn(state, batch):
+  def step_fn(state, batch, get_id, config):
     """Running one step of training or evaluation.
 
     This function will undergo `jax.lax.scan` so that multiple steps can be pmapped and jit-compiled together
@@ -186,13 +192,14 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
       batch: A mini-batch of training/evaluation data.
 
     Returns:
-      loss: The average loss value of this state.
+      loss_dict: The average loss value of this state.
     """
     model = state['model']
     if train:
       optimizer = state['optimizer']
       optimizer.zero_grad()
-      loss = loss_fn(model, batch)
+      loss_dict = loss_fn(model, batch, get_id)
+      loss = loss_dict['recon_loss'] + config.training.id_weight * loss_dict['id_loss']
       loss.backward()
       optimize_fn(optimizer, model.parameters(), step=state['step'])
       state['step'] += 1
@@ -202,9 +209,10 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         ema = state['ema']
         ema.store(model.parameters())
         ema.copy_to(model.parameters())
-        loss = loss_fn(model, batch)
+        loss_dict = loss_fn(model, batch, get_id)
+        loss = loss_dict['recon_loss'] + config.training.id_weight * loss_dict['id_loss']
         ema.restore(model.parameters())
 
-    return loss
+    return loss_dict
 
   return step_fn

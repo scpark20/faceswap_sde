@@ -40,6 +40,11 @@ import torch
 from torch.utils import tensorboard
 from torchvision.utils import make_grid, save_image
 from utils import save_checkpoint, restore_checkpoint
+import functools
+
+# ArcFace
+from recog_backbones import get_recog
+from arcface import get_id_from_image
 
 FLAGS = flags.FLAGS
 
@@ -111,6 +116,17 @@ def train(config, workdir):
                                     reduce_mean=reduce_mean, continuous=continuous,
                                     likelihood_weighting=likelihood_weighting)
 
+  # ArcFace 모델로드
+  Arc_path = 'embedder_model/partial_fc_glint360k_r100.pth'
+  resnet_name = Arc_path.split('_')[-1].split('.')[0]
+  embedder = get_recog(resnet_name, fp16=False)  # get_recog 함수에서 r100, r50 등의 입력으로 모델 구조를 결정
+  embedder.load_state_dict(torch.load(Arc_path))
+  embedder = embedder.to(config.device)
+  embedder = torch.nn.DataParallel(embedder, device_ids=config.device_ids)
+  embedder.eval()
+
+  get_id_from_image_partial = functools.partial(get_id_from_image, embedder=embedder, centered=config.data.centered)
+
   # Building sampling functions
   if config.training.snapshot_sampling:
     sampling_shape = (16, config.data.num_channels,
@@ -133,10 +149,12 @@ def train(config, workdir):
     #batch = batch.permute(0, 3, 1, 2)
     batch = scaler(batch)
     # Execute one training step
-    loss = train_step_fn(state, batch)
+    loss_dict = train_step_fn(state, batch, get_id_from_image_partial, config)
     if step % config.training.log_freq == 0:
-      logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
-      writer.add_scalar("training_loss", loss, step)
+      logging.info("step: %d, recon_loss: %.5e" % (step, loss_dict['recon_loss'].item()))
+      logging.info("step: %d, id_loss: %.5e" % (step, loss_dict['id_loss'].item()))
+      writer.add_scalar("recon_loss", loss_dict['recon_loss'], step)
+      writer.add_scalar("id_loss", loss_dict['id_loss'], step)
 
     # Save a temporary checkpoint to resume training after pre-emption periodically
     if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
@@ -152,9 +170,11 @@ def train(config, workdir):
         eval_batch = next(eval_iter).to(config.device).float()
       #eval_batch = eval_batch.permute(0, 3, 1, 2)
       eval_batch = scaler(eval_batch)
-      eval_loss = eval_step_fn(state, eval_batch)
-      logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
-      writer.add_scalar("eval_loss", eval_loss.item(), step)
+      eval_loss_dict = eval_step_fn(state, eval_batch, get_id_from_image_partial, config)
+      logging.info("step: %d, eval_recon_loss: %.5e" % (step, eval_loss_dict['recon_loss'].item()))
+      logging.info("step: %d, eval_id_loss: %.5e" % (step, eval_loss_dict['id_loss'].item()))
+      writer.add_scalar("eval_recon_loss", eval_loss_dict['recon_loss'], step)
+      writer.add_scalar("eval_id_loss", eval_loss_dict['id_loss'], step)
 
     # Save a checkpoint periodically and generate samples if needed
     if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
@@ -302,7 +322,8 @@ def evaluate(config,
         eval_batch = batch.to(config.device).float()
         #eval_batch = eval_batch.permute(0, 3, 1, 2)
         eval_batch = scaler(eval_batch)
-        eval_loss = eval_step(state, eval_batch)
+        img_id = get_id_from_image(embedder, eval_batch, config.data.centered).detach()
+        eval_loss = eval_step(state, eval_batch, img_id)
         all_losses.append(eval_loss.item())
         if (i + 1) % 1000 == 0:
           logging.info("Finished %dth step loss evaluation" % (i + 1))
