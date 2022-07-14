@@ -100,6 +100,7 @@ def get_config():
   model.fourier_scale = 16
   model.conv_size = 3
   model.cond_dim = 512
+  model.adain = False
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()

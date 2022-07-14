@@ -462,10 +462,12 @@ class UNet(nn.Module):
 
         return out
 
-def get_id_from_image(img, embedder, centered):
+def get_id_from_image(img, embedder, centered, downsample=False):
   if centered:
     img = (img + 1) / 2
   img = torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=False)(img)
+  if downsample:
+    img = F.interpolate(img, scale_factor=56 / img.shape[-1])
   img = F.interpolate(img, scale_factor=112 / img.shape[-1])
   id = embedder(img)
   id = F.normalize(id, p=2, dim=1)

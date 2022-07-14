@@ -411,6 +411,85 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
 
   return pc_sampler
 
+def get_pc_inpainter(sde, predictor, corrector, inverse_scaler, snr,
+                   n_steps=1, probability_flow=False, continuous=False,
+                   denoise=True, eps=1e-3, device='cuda'):
+  """Create a Predictor-Corrector (PC) sampler.
+
+  Args:
+    sde: An `sde_lib.SDE` object representing the forward SDE.
+    predictor: A subclass of `sampling.Predictor` representing the predictor algorithm.
+    corrector: A subclass of `sampling.Corrector` representing the corrector algorithm.
+    inverse_scaler: The inverse data normalizer.
+    snr: A `float` number. The signal-to-noise ratio for configuring correctors.
+    n_steps: An integer. The number of corrector steps per predictor update.
+    probability_flow: If `True`, solve the reverse-time probability flow ODE when running the predictor.
+    continuous: `True` indicates that the score model was continuously trained.
+    denoise: If `True`, add one-step denoising to the final samples.
+    eps: A `float` number. The reverse-time SDE and ODE are integrated to `epsilon` to avoid numerical issues.
+    device: PyTorch device.
+
+  Returns:
+    A sampling function that returns samples and the number of function evaluations during sampling.
+  """
+  # Create predictor & corrector update functions
+
+  predictor_update_fn = functools.partial(shared_predictor_update_fn,
+                                          sde=sde,
+                                          predictor=predictor,
+                                          probability_flow=probability_flow,
+                                          continuous=continuous)
+  corrector_update_fn = functools.partial(shared_corrector_update_fn,
+                                          sde=sde,
+                                          corrector=corrector,
+                                          continuous=continuous,
+                                          snr=snr,
+                                          n_steps=n_steps)
+
+  def get_inpainter_update_fn(update_fn):
+    def inpaint_update_fn(x, t, c, data, mask, model):
+      x, x_mean = update_fn(x, t, c, model=model)
+      masked_data_mean, std = sde.marginal_prob(data, t)
+      masked_data = masked_data_mean + torch.randn_like(masked_data_mean) * std
+      x = x * (1. - mask) + masked_data * mask
+      x_mean = x * (1. - mask) + masked_data_mean * mask
+      return x, x_mean
+    return inpaint_update_fn
+
+  predictor_inpaint_update_fn = get_inpainter_update_fn(predictor_update_fn)
+  corrector_inpaint_update_fn = get_inpainter_update_fn(corrector_update_fn)
+
+  def pc_inpainter(model, c, data, mask):
+    """ The PC sampler funciton.
+
+    Args:
+      model: A score model.
+    Returns:
+      Samples, number of function evaluations.
+    """
+    with torch.no_grad():
+      # Initial sample
+      shape = data.shape
+      timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
+
+      x = None
+      xs = []
+      for i in tqdm(range(sde.N)):
+        t = timesteps[i]
+        vec_t = torch.ones(shape[0], device=t.device) * t
+        if x is None:
+          mean, std = sde.marginal_prob(data, vec_t)
+          x = mean + torch.randn_like(mean) * std
+          xs.append(x)
+
+        x, x_mean = corrector_inpaint_update_fn(x, vec_t, c, data, mask, model=model)
+        x, x_mean = predictor_inpaint_update_fn(x, vec_t, c, data, mask, model=model)
+        xs.append(x)
+
+      return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1), xs
+
+  return pc_inpainter
+
 
 def get_ode_sampler(sde, shape, inverse_scaler,
                     denoise=False, rtol=1e-5, atol=1e-5,

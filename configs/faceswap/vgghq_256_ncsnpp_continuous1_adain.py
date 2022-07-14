@@ -23,7 +23,7 @@ def get_config():
   # training
   config.training = training = ml_collections.ConfigDict()
   #config.training.batch_size = 512
-  config.training.batch_size = 14
+  config.training.batch_size = 36
   training.n_iters = 2400001
   training.snapshot_freq = 5000
   training.log_freq = 1
@@ -100,7 +100,7 @@ def get_config():
   model.fourier_scale = 16
   model.conv_size = 3
   model.cond_dim = 512
-  model.adain = False
+  model.adain = True
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
@@ -114,6 +114,6 @@ def get_config():
 
   config.seed = 42
   config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-  config.device_ids = [0, 1]
+  config.device_ids = [0, 1, 2, 3, 4, 5]
 
   return config

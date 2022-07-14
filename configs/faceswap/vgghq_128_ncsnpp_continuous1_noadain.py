@@ -23,7 +23,7 @@ def get_config():
   # training
   config.training = training = ml_collections.ConfigDict()
   #config.training.batch_size = 512
-  config.training.batch_size = 14
+  config.training.batch_size = 16
   training.n_iters = 2400001
   training.snapshot_freq = 5000
   training.log_freq = 1
@@ -38,6 +38,7 @@ def get_config():
   training.sde = 'vesde'
   training.continuous = True
   training.id_weight = 1
+  training.crossid_weight = 0.0
 
   # eval
   config.eval = evaluate = ml_collections.ConfigDict()
@@ -63,7 +64,7 @@ def get_config():
   data.centered = False
   data.num_channels = 3
   data.dataset = 'vgg'
-  data.image_size = 256
+  data.image_size = 128
   data.path = '/data/VGG-Face2-HQ'
   #data.tfrecords_path = '/home/yangsong/ncsc/ffhq/ffhq-r08.tfrecords'
 

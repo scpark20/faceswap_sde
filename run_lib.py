@@ -153,8 +153,10 @@ def train(config, workdir):
     if step % config.training.log_freq == 0:
       logging.info("step: %d, recon_loss: %.5e" % (step, loss_dict['recon_loss'].item()))
       logging.info("step: %d, id_loss: %.5e" % (step, loss_dict['id_loss'].item()))
+      logging.info("step: %d, crossid_loss: %.5e" % (step, loss_dict['crossid_loss'].item()))
       writer.add_scalar("recon_loss", loss_dict['recon_loss'], step)
       writer.add_scalar("id_loss", loss_dict['id_loss'], step)
+      writer.add_scalar("crossid_loss", loss_dict['crossid_loss'], step)
 
     # Save a temporary checkpoint to resume training after pre-emption periodically
     if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
@@ -173,8 +175,10 @@ def train(config, workdir):
       eval_loss_dict = eval_step_fn(state, eval_batch, get_id_from_image_partial, config)
       logging.info("step: %d, eval_recon_loss: %.5e" % (step, eval_loss_dict['recon_loss'].item()))
       logging.info("step: %d, eval_id_loss: %.5e" % (step, eval_loss_dict['id_loss'].item()))
+      logging.info("step: %d, eval_crossid_loss: %.5e" % (step, eval_loss_dict['crossid_loss'].item()))
       writer.add_scalar("eval_recon_loss", eval_loss_dict['recon_loss'], step)
       writer.add_scalar("eval_id_loss", eval_loss_dict['id_loss'], step)
+      writer.add_scalar("eval_crossid_loss", eval_loss_dict['crossid_loss'], step)
 
     # Save a checkpoint periodically and generate samples if needed
     if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:

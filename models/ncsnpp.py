@@ -129,7 +129,8 @@ class NCSNpp(nn.Module):
                                       init_scale=init_scale,
                                       skip_rescale=skip_rescale,
                                       temb_dim=nf * 4,
-                                      cond_dim=config.model.cond_dim)
+                                      cond_dim=config.model.cond_dim,
+                                      adain=config.model.adain)
 
     else:
       raise ValueError(f'resblock type {resblock_type} unrecognized.')

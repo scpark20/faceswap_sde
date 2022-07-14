@@ -89,19 +89,31 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     unperturbed_data = sde.predict_unperturbed_data(perturbed_data, score, mean, std[:, None, None, None])
     prd_id = get_id(img=unperturbed_data)
 
+    # permutation
+    index_permed = np.random.permutation(len(batch))
+    score_permed = score_fn(perturbed_data, t, img_id[index_permed])
+    unperturbed_data_permed = sde.predict_unperturbed_data(perturbed_data, score_permed, mean, std[:, None, None, None])
+    pred_id_permed = get_id(img=unperturbed_data_permed)
+
     loss_dict = {}
     if not likelihood_weighting:
+      # (b, c, h, w)
       recon_losses = torch.square(score * std[:, None, None, None] + z)
+      # (b, c*h*w), (b,)
       recon_losses = reduce_op(recon_losses.reshape(recon_losses.shape[0], -1), dim=-1)
       id_losses = 1 - cosin_metric(img_id, prd_id)
       id_losses = reduce_op(id_losses, dim=-1)
+      crossid_losses = 1 - cosin_metric(img_id[index_permed], pred_id_permed)
+      crossid_losses = reduce_op(crossid_losses, dim=-1)
     else:
       g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
       losses = torch.square(score + z / std[:, None, None, None])
       losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
 
+    #(,)
     loss_dict['recon_loss'] = torch.mean(recon_losses)
     loss_dict['id_loss'] = torch.mean(id_losses)
+    loss_dict['crossid_loss'] = torch.mean(crossid_losses)
     return loss_dict
 
   return loss_fn
@@ -199,7 +211,9 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
       optimizer = state['optimizer']
       optimizer.zero_grad()
       loss_dict = loss_fn(model, batch, get_id)
-      loss = loss_dict['recon_loss'] + config.training.id_weight * loss_dict['id_loss']
+      loss = loss_dict['recon_loss'] + \
+             config.training.id_weight * loss_dict['id_loss'] + \
+             config.training.crossid_weight * loss_dict['crossid_loss']
       loss.backward()
       optimize_fn(optimizer, model.parameters(), step=state['step'])
       state['step'] += 1
@@ -210,7 +224,9 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         ema.store(model.parameters())
         ema.copy_to(model.parameters())
         loss_dict = loss_fn(model, batch, get_id)
-        loss = loss_dict['recon_loss'] + config.training.id_weight * loss_dict['id_loss']
+        loss = loss_dict['recon_loss'] + \
+               config.training.id_weight * loss_dict['id_loss'] + \
+               config.training.crossid_weight * loss_dict['crossid_loss']
         ema.restore(model.parameters())
 
     return loss_dict

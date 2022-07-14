@@ -242,7 +242,7 @@ class VESDE(SDE):
   def predict_unperturbed_data(self, perturbed_data, score, marginal_mean, marginal_std):
     # x_t = x_0 + std * eps, eps ~ N(0, I)
     # s(x_t) * std + eps = 0, in loss func
-    # therefore, x_0 = std**2 * s(x_t)
+    # therefore, x_0 = std**2 * s(x_t) + x_t
     unperturbed_data = marginal_std**2 * score + perturbed_data
     return unperturbed_data
 

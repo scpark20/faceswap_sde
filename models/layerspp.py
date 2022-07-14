@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import numpy as np
+from math import sqrt
 
 conv1x1 = layers.ddpm_conv1x1
 conv3x3 = layers.ddpm_conv3x3
@@ -208,11 +209,72 @@ class ResnetBlockDDPMpp(nn.Module):
     else:
       return (x + h) / np.sqrt(2.)
 
+class EqualLR:
+  def __init__(self, name):
+    self.name = name
+
+  def compute_weight(self, module):
+    weight = getattr(module, self.name + '_orig')
+    fan_in = weight.data.size(1) * weight.data[0][0].numel()
+
+    return weight * sqrt(2 / fan_in)
+
+  @staticmethod
+  def apply(module, name):
+    fn = EqualLR(name)
+
+    weight = getattr(module, name)
+    del module._parameters[name]
+    module.register_parameter(name + '_orig', nn.Parameter(weight.data))
+    module.register_forward_pre_hook(fn)
+
+    return fn
+
+  def __call__(self, module, input):
+    weight = self.compute_weight(module)
+    setattr(module, self.name, weight)
+
+def equal_lr(module, name='weight'):
+  EqualLR.apply(module, name)
+
+  return module
+
+class EqualLinear(nn.Module):
+  def __init__(self, in_dim, out_dim):
+    super().__init__()
+
+    linear = nn.Linear(in_dim, out_dim)
+    linear.weight.data.normal_()
+    linear.bias.data.zero_()
+
+    self.linear = equal_lr(linear)
+
+  def forward(self, input):
+    return self.linear(input)
+
+class AdaptiveInstanceNorm(nn.Module):
+  def __init__(self, in_channel, style_dim):
+    super().__init__()
+
+    self.norm = nn.InstanceNorm2d(in_channel)
+    self.style = EqualLinear(style_dim, in_channel * 2)
+
+    self.style.linear.bias.data[:in_channel] = 1
+    self.style.linear.bias.data[in_channel:] = 0
+
+  def forward(self, input, style):
+    style = self.style(style).unsqueeze(2).unsqueeze(3)
+    gamma, beta = style.chunk(2, 1)
+
+    out = self.norm(input)
+    out = gamma * out + beta
+
+    return out
 
 class ResnetBlockBigGANpp(nn.Module):
   def __init__(self, act, in_ch, out_ch=None, temb_dim=None, cond_dim=None, up=False, down=False,
                dropout=0.1, fir=False, fir_kernel=(1, 3, 3, 1),
-               skip_rescale=True, init_scale=0.):
+               skip_rescale=True, init_scale=0., adain=False):
     super().__init__()
 
     out_ch = out_ch if out_ch else in_ch
@@ -229,9 +291,15 @@ class ResnetBlockBigGANpp(nn.Module):
       nn.init.zeros_(self.Dense_0.bias)
 
     if cond_dim is not None:
-      self.Dense_1 = nn.Linear(cond_dim, out_ch)
-      self.Dense_1.weight.data = default_init()(self.Dense_1.weight.shape)
-      nn.init.zeros_(self.Dense_1.bias)
+      self.adain = adain
+      if adain is False:
+        self.Dense_1 = nn.Linear(cond_dim, out_ch)
+        self.Dense_1.weight.data = default_init()(self.Dense_1.weight.shape)
+        nn.init.zeros_(self.Dense_1.bias)
+
+      else:
+        print('adain inited.')
+        self.adain = AdaptiveInstanceNorm(out_ch, cond_dim)
 
     self.GroupNorm_1 = nn.GroupNorm(num_groups=min(out_ch // 4, 32), num_channels=out_ch, eps=1e-6)
     self.Dropout_0 = nn.Dropout(dropout)
@@ -267,7 +335,10 @@ class ResnetBlockBigGANpp(nn.Module):
     if temb is not None:
       h += self.Dense_0(self.act(temb))[:, :, None, None]
     if c is not None:
-      h += self.Dense_1(c)[:, :, None, None]
+      if self.adain is False:
+        h += self.Dense_1(c)[:, :, None, None]
+      else:
+        h = self.adain(h, c)
     h = self.act(self.GroupNorm_1(h))
     h = self.Dropout_0(h)
     h = self.Conv_1(h)
